@@ -1,66 +1,65 @@
-const express = require('express');
-const router = express.Router();
-const User = require('../models/user');
+const router = require('express').Router();
+let User = require('../models/user'); // Import your User model
+const jwt = require('jsonwebtoken'); // You'll need to install this: npm install jsonwebtoken
 
-// get all or filter users
-router.get('/', async (req, res) => {
-    console.log('Received Query:', req.query);
-  try {
-    const { search, passwordSearch} = req.query;
+// @route   POST /users/register
+// @desc    Register new user
+// @access  Public
+router.post('/register', async (req, res) => {
+  const { username, password } = req.body;
 
-    const filter = {};
-
-    if (search && passwordSearch) {
-      filter.username = search;
-      filter.password = passwordSearch;
-    } else if (search) {
-      filter.username = search;
-    } else if (passwordSearch) {
-      filter.password = passwordSearch;
-    }
-
-    const users = await User.find(filter).select('_id username password');
-
-    res.status(200).json(users);
-  } catch (error) {
-    console.error('Error fetching users:', error);
-    res.status(500).json({ message: 'Internal Server Error' });
+  if (!username || !password) {
+    return res.status(400).json({ msg: 'Please enter all fields' });
   }
-});
 
-// Get user by ID
-router.get('/:userId', async (req, res) => {
   try {
-    const user = await User.findById(req.params.userId);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-    res.status(200).json(user);
-  } catch (error) {
-    console.error('Error fetching user:', error);
-    res.status(500).json({ message: 'Internal Server Error' });
-  }
-});
+    let user = await User.findOne({ username });
+    if (user) return res.status(400).json({ msg: 'User already exists' });
 
-// post new users
-router.post('/', async (req, res) => {
-    const { username, password } = req.body;
-    
-    if (!username || !password) {
-        return res.status(400).json({ message: 'Username and password are required.' });
-    }
+    user = new User({ username, password });
+    await user.save();
 
-    const newUser = new User({
-        username,
-        password,
+    // Generate a token upon successful registration
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+    res.status(201).json({
+      token,
+      user: { id: user._id, username: user.username }
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
-    try {
-        const savedUser = await newUser.save();
-        res.status(201).json(savedUser);
-    } catch (err) {
-        res.status(400).json({ message: err.message });
-    }
+// @route   POST /users/login
+// @desc    Authenticate user & get JWT token
+// @access  Public
+router.post('/login', async (req, res) => {
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({ msg: 'Please enter all fields' });
+  }
+
+  try {
+    // 1. Find the user by username
+    const user = await User.findOne({ username });
+    if (!user) return res.status(400).json({ msg: 'Invalid Credentials' });
+
+    // 2. Use user.comparePassword(candidatePassword) to verify the password
+    const isMatch = await user.comparePassword(password);
+    if (!isMatch) return res.status(400).json({ msg: 'Invalid Credentials' });
+
+    // 3. If valid, generate a JWT and send it back
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' }); // JWT_SECRET should be in your .env
+
+    res.json({
+      token,
+      user: { id: user._id, username: user.username }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;
